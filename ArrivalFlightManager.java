@@ -1,30 +1,21 @@
 import java.io.*;
 import java.time.LocalDateTime;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-
 
 public class ArrivalFlightManager {
 
     private FlightManagement flightManagement;
     private String arrivedFlightFilePath = "arrivedFlights.txt";
-
-    private DepartureFlightManager departureManager; // new
-    private List<Flight> arrivedFlights; // store flights that have completed arrival
+    private List<Flight> arrivedFlights;
 
     public ArrivalFlightManager(FlightManagement fm) {
         this.flightManagement = fm;
         this.arrivedFlights = new ArrayList<>();
     }
 
-    public void setDepartureManager(DepartureFlightManager dm) {
-        this.departureManager = dm;
-    }
-
-
     // ========================
-    // Start arrival process (ARRIVE-SCHEDULED → ARRIVING)
+    // Process arrival
     // ========================
     public void processArrival(String flightInstanceId, LocalDateTime currentTime) {
         Flight f = flightManagement.FindFlightByInstanceId(flightInstanceId);
@@ -33,74 +24,86 @@ public class ArrivalFlightManager {
             return;
         }
 
+        if (!"Dhaka".equalsIgnoreCase(f.getDestination())) {
+            System.out.println("Flight " + flightInstanceId + " is not an arrival flight.");
+            return;
+        }
+
         if (f.getStatus().equalsIgnoreCase("ARRIVING") || f.getStatus().equalsIgnoreCase("ARRIVED")) {
             System.out.println("Flight already in " + f.getStatus() + " status.");
             return;
         }
 
-        if (f.getStatus().equalsIgnoreCase("ARRIVE-SCHEDULED")) {
-            // Assign gate
-            if (!flightManagement.assignGate(f)) {
-                checkAndCompleteArrivals(currentTime);
-                if (!flightManagement.assignGate(f)) {
-                    departureManager.checkAndDepartFlights(currentTime);
-                    if (!flightManagement.assignGate(f)) {
-                        System.out.println("Failed to assign gate. Flight delayed.");
-                        flightManagement.updateFlightStatus(f, "DELAYED");
-                        return;
-                    }
-                }
-            }
+        WeatherManager weatherManager = flightManagement.getWeatherManager();
+        WeatherType weather = weatherManager.getWeather(currentTime);
 
-            // Assign runway
-            if (!flightManagement.assignRunway(f)) {
-                System.out.println("Failed to assign runway for flight " + flightInstanceId);
-                return;
-            }
-
-            // Set status to ARRIVING
-            flightManagement.updateFlightStatus(f, "ARRIVING");
-            System.out.println("Flight " + flightInstanceId + " is now ARRIVING at gate " +
-                    f.getGateId() + " using runway " + f.getRunwayId() + ".");
-        } else {
-            System.out.println("Flight " + flightInstanceId + " is not an arrival flight, skipping...");
+        if (weather.isBadWeather()) {
+            LocalDateTime stormEndTime = weatherManager.getWeatherEndTime(currentTime);
+            flightManagement.handleBadWeather(currentTime, stormEndTime);
+            return;
         }
+
+        flightManagement.processGoodWeatherProcessArrival(flightInstanceId, currentTime);
     }
 
     // ========================
-    // Scan ARRIVING flights and complete arrival based on currentTime
+    // Check and complete arrivals
     // ========================
     public void checkAndCompleteArrivals(LocalDateTime currentTime) {
         for (Flight f : flightManagement.getFlights()) {
             if (f.getStatus().equalsIgnoreCase("ARRIVING")) {
                 if (!currentTime.isBefore(f.getArrivalDateTime().plusMinutes(20))) {
                     flightManagement.updateFlightStatus(f, "ARRIVED");
-                    arrivedFlights.add(f); // add directly to the arrived list
+                    arrivedFlights.add(f);
                     System.out.println("Flight " + f.getFlightInstanceId() + " has ARRIVED at gate " +
                             f.getGateId() + " using runway " + f.getRunwayId() + ".");
 
-
-                    // Free gate and runway
                     if (f.getGateId() != null && !f.getGateId().equals("-")) {
-                        flightManagement.freeGate(f); // Actually we need freeGate
+                        flightManagement.freeGate(f);
                     }
                     if (f.getRunwayId() != null && !f.getRunwayId().equals("-")) {
-                        flightManagement.freeRunway(f); // Actually we need freeRunway
+                        flightManagement.freeRunway(f);
                     }
                     System.out.println("-------------------------------------");
                 }
             }
-
         }
         saveAllArrivedFlights(arrivedFlights);
-        // Remove all arrived flights from active flight list
-//        if (!arrivedFlights.isEmpty()) {
-//            flightManagement.getFlights().removeAll(arrivedFlights);
-//            flightManagement.saveFlightsToFile();
-//        }
     }
 
-    // Display all departed flights from departedFlights.txt
+    // ========================
+    // Save diverted flight
+    // ========================
+    public void saveDivertedFlight(Flight f) {
+        f.setStatus("DIVERTED");
+        try (BufferedWriter bw = new BufferedWriter(new FileWriter(arrivedFlightFilePath, true))) {
+            bw.write(f.toFileString());
+            bw.newLine();
+        } catch (IOException e) {
+            System.out.println("Error saving diverted flight: " + e.getMessage());
+        }
+    }
+
+    // ========================
+    // Save all arrived flights
+    // ========================
+    public void saveAllArrivedFlights(List<Flight> arrivedFlights) {
+        if (arrivedFlights.isEmpty()) return;
+        try (BufferedWriter bw = new BufferedWriter(new FileWriter(arrivedFlightFilePath, true))) {
+            for (Flight f : arrivedFlights) {
+                bw.write(f.toFileString());
+                bw.newLine();
+            }
+            System.out.println("All arrived flights saved to " + arrivedFlightFilePath);
+        } catch (IOException e) {
+            System.out.println("Error saving arrived flights: " + e.getMessage());
+        }
+        arrivedFlights.clear();
+    }
+
+    // ========================
+    // Display arrived flights
+    // ========================
     public void displayArrivedFlights() {
         try (BufferedReader br = new BufferedReader(new FileReader(arrivedFlightFilePath))) {
             String line;
@@ -126,27 +129,7 @@ public class ArrivalFlightManager {
     }
 
     // ========================
-    // Save all arrived flights to arrivedFlights.txt
-    // ========================
-    public void saveAllArrivedFlights(List<Flight> arrivedFlights) {
-        if (arrivedFlights.isEmpty()) return;
-
-        try (BufferedWriter bw = new BufferedWriter(new FileWriter(arrivedFlightFilePath, true))) {
-            for (Flight f : arrivedFlights) {
-                bw.write(f.toFileString());
-                bw.newLine();
-            }
-            System.out.println("All arrived flights saved to " + arrivedFlightFilePath);
-        } catch (IOException e) {
-            System.out.println("Error saving arrived flights: " + e.getMessage());
-        }
-
-        // Clear arrivedFlights list
-        arrivedFlights.clear();
-    }
-
-    // ========================
-    // Clear arrivedFlights.txt
+    // Clear arrived flights file
     // ========================
     public void clearArrivedFlightsFile() {
         try (BufferedWriter bw = new BufferedWriter(new FileWriter(arrivedFlightFilePath))) {
@@ -157,10 +140,6 @@ public class ArrivalFlightManager {
         }
     }
 
-
-    // ========================
-    // Getter for arrivedFlights list (optional)
-    // ========================
     public List<Flight> getArrivedFlights() {
         return new ArrayList<>(arrivedFlights);
     }
