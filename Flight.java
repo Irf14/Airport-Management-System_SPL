@@ -190,10 +190,12 @@ public class Flight {
     }
 
     public void removeOccupiedSeat(String seat) {
-        if (passengerCount <= 0)
-            return;
-        occupiedSeats.remove(seat);
-        passengerCount--;
+        // Check if the seat is actually occupied
+        if (occupiedSeats.contains(seat)) {
+            occupiedSeats.remove(seat);
+            passengerCount--;
+        }
+        // If seat not found, do nothing (no change to passengerCount)
     }
 
     public boolean bookSpecificSeats(List<String> seats) {

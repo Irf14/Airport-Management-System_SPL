@@ -18,6 +18,8 @@ public class FlightManagement {
     private DepartureFlightManager departureManager;
     private ArrivalFlightManager arrivalManager;
 
+    private boolean simulationMode = false;
+
     // ============================================================
     // CONSTRUCTOR
     // ============================================================
@@ -49,6 +51,14 @@ public class FlightManagement {
 
     public List<Flight> getFlights() {
         return flights;
+    }
+
+    public void setSimulationMode(boolean mode) {
+        this.simulationMode = mode;
+    }
+
+    public boolean isSimulationMode() {
+        return simulationMode;
     }
 
     // ============================================================
@@ -283,7 +293,7 @@ public class FlightManagement {
      * @param capacity    Number of flights to schedule simultaneously
      *                    (gates/runways needed)
      * @return The earliest time when enough resources are free (with 1 minute
-     * buffer)
+     *         buffer)
      */
     private LocalDateTime getEarliestFreeTimeForAllResources(LocalDateTime currentTime, int capacity) {
         // Count currently free resources
@@ -382,7 +392,8 @@ public class FlightManagement {
                     f.setArrivalDateTime(arrival);
                     f.setLastUpdatedTime(slot);
                     f.setStatus("HOLDING");
-                    System.out.println("Flight " + f.getFlightInstanceId() + " HOLDING, rescheduled to arrive at " + arrival);
+                    System.out.println(
+                            "Flight " + f.getFlightInstanceId() + " HOLDING, rescheduled to arrive at " + arrival);
                 } else {
                     LocalDateTime depart = slot.plusHours(1);
                     LocalDateTime arrival = depart.plusMinutes(f.getFlightDurationMinutes());
@@ -395,7 +406,8 @@ public class FlightManagement {
                     f.setArrivalDateTime(arrival);
                     f.setLastUpdatedTime(slot);
                     f.setStatus("DELAYED");
-                    System.out.println("Flight " + f.getFlightInstanceId() + " DELAYED, rescheduled to depart at " + depart);
+                    System.out.println(
+                            "Flight " + f.getFlightInstanceId() + " DELAYED, rescheduled to depart at " + depart);
                 }
                 batch.add(f);
                 count++;
@@ -443,6 +455,14 @@ public class FlightManagement {
 
         // Calculate start time based on resources becoming free AFTER storm
         LocalDateTime start = getEarliestFreeTimeForAllResources(stormEnd, capacity);
+
+        // ============================================================
+        // FIX: Ensure we never schedule flights before storm ends
+        // ============================================================
+        if (start.isBefore(stormEnd)) {
+            start = stormEnd;
+            System.out.println("   Adjusted start time to storm end: " + stormEnd);
+        }
 
         batchSchedule(all, start, capacity);
         System.out.println("All flights rescheduled after storm.");
@@ -514,7 +534,7 @@ public class FlightManagement {
         // Determine capacity and gates
         // ============================================================
         int capacity = Math.min(gateManagement.getTotalGateCount(), runwayManagement.getTotalRunwayCount());
-        int gates = (missed <= 3) ? 1 : capacity;  // FIXED: changed from <=3 to <=2
+        int gates = (missed <= 3) ? 1 : capacity; // FIXED: changed from <=3 to <=2
 
         // ============================================================
         // Determine start time based on gates
@@ -686,7 +706,6 @@ public class FlightManagement {
 
         List<Flight> holding = new ArrayList<>(), delayed = new ArrayList<>();
 
-        // Find all missed flights (no current flight)
         for (Flight f : flights) {
             String s = f.getStatus().toUpperCase();
             if (s.equals("DEPARTED") || s.equals("ARRIVED") || s.equals("DIVERTED") || s.equals("CANCELLED")
@@ -707,19 +726,16 @@ public class FlightManagement {
 
         int missed = holding.size() + delayed.size();
         if (missed == 0) {
-            System.out.println("No missed flights found.");
+            // Only print in manual mode, not in simulation
+            if (!simulationMode) {
+                System.out.println("No missed flights found.");
+            }
             return;
         }
 
-        // ============================================================
-        // Determine capacity and gates
-        // ============================================================
         int capacity = Math.min(gateManagement.getTotalGateCount(), runwayManagement.getTotalRunwayCount());
-        int gates = (missed <= 3) ? 1 : capacity;
+        int gates = (missed <= 2) ? 1 : capacity;
 
-        // ============================================================
-        // Determine start time based on gates
-        // ============================================================
         LocalDateTime start;
         if (gates == 1) {
             start = getEarliestFreeTimeForOneResource(now);
@@ -727,14 +743,15 @@ public class FlightManagement {
             start = getEarliestFreeTimeForAllResources(now, capacity);
         }
 
-        // ============================================================
-        // Build final schedule: arrivals first, then departures
-        // ============================================================
         List<Flight> finalSchedule = new ArrayList<>();
-        finalSchedule.addAll(holding); // All missed arrivals first
-        finalSchedule.addAll(delayed); // All missed departures last
+        finalSchedule.addAll(holding);
+        finalSchedule.addAll(delayed);
 
         batchSchedule(finalSchedule, start, gates);
-        System.out.println("Waiting flights rescheduled successfully.");
+
+        // Only print success message in manual mode
+        if (!simulationMode) {
+            System.out.println("Waiting flights rescheduled successfully.");
+        }
     }
 }

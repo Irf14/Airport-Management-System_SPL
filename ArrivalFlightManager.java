@@ -9,28 +9,32 @@ public class ArrivalFlightManager {
     private String arrivedFlightFilePath = "arrivedFlights.txt";
     private List<Flight> arrivedFlights;
 
+    // ANSI Color Codes
+    private static final String RESET = "\u001B[0m";
+    private static final String GREEN = "\u001B[32m";
+    private static final String YELLOW = "\u001B[33m";
+    private static final String RED = "\u001B[31m";
+    private static final String CYAN = "\u001B[36m";
+
     public ArrivalFlightManager(FlightManagement fm) {
         this.flightManagement = fm;
         this.arrivedFlights = new ArrayList<>();
     }
 
-    // ========================
-    // Process arrival
-    // ========================
     public void processArrival(String flightInstanceId, LocalDateTime currentTime) {
         Flight f = flightManagement.FindFlightByInstanceId(flightInstanceId);
         if (f == null) {
-            System.out.println("Flight " + flightInstanceId + " not found.");
+            System.out.println(RED + "Flight " + flightInstanceId + " not found." + RESET);
             return;
         }
 
         if (!"Dhaka".equalsIgnoreCase(f.getDestination())) {
-            System.out.println("Flight " + flightInstanceId + " is not an arrival flight.");
+            System.out.println(RED + "Flight " + flightInstanceId + " is not an arrival flight." + RESET);
             return;
         }
 
         if (f.getStatus().equalsIgnoreCase("ARRIVING") || f.getStatus().equalsIgnoreCase("ARRIVED")) {
-            System.out.println("Flight already in " + f.getStatus() + " status.");
+            System.out.println(YELLOW + "Flight already in " + f.getStatus() + " status." + RESET);
             return;
         }
 
@@ -46,17 +50,16 @@ public class ArrivalFlightManager {
         flightManagement.processGoodWeatherProcessArrival(flightInstanceId, currentTime);
     }
 
-    // ========================
-    // Check and complete arrivals
-    // ========================
     public void checkAndCompleteArrivals(LocalDateTime currentTime) {
+        List<Flight> completedArrivals = new ArrayList<>();
         for (Flight f : flightManagement.getFlights()) {
             if (f.getStatus().equalsIgnoreCase("ARRIVING")) {
                 if (!currentTime.isBefore(f.getArrivalDateTime().plusMinutes(20))) {
                     flightManagement.updateFlightStatus(f, "ARRIVED");
                     arrivedFlights.add(f);
-                    System.out.println("Flight " + f.getFlightInstanceId() + " has ARRIVED at gate " +
-                            f.getGateId() + " using runway " + f.getRunwayId() + ".");
+                    completedArrivals.add(f);
+                    System.out.println(CYAN + "🛬 Flight " + f.getFlightInstanceId() + " has ARRIVED at gate " +
+                            f.getGateId() + " using runway " + f.getRunwayId() + "." + RESET);
 
                     if (f.getGateId() != null && !f.getGateId().equals("-")) {
                         flightManagement.freeGate(f);
@@ -69,24 +72,25 @@ public class ArrivalFlightManager {
             }
         }
         saveAllArrivedFlights(arrivedFlights);
+        if (!completedArrivals.isEmpty()) {
+            flightManagement.getFlights().removeAll(completedArrivals);
+            flightManagement.saveFlightsToFile();
+        }
     }
 
-    // ========================
-    // Save diverted flight
-    // ========================
     public void saveDivertedFlight(Flight f) {
         f.setStatus("DIVERTED");
         try (BufferedWriter bw = new BufferedWriter(new FileWriter(arrivedFlightFilePath, true))) {
             bw.write(f.toFileString());
             bw.newLine();
         } catch (IOException e) {
-            System.out.println("Error saving diverted flight: " + e.getMessage());
+            System.out.println(RED + "Error saving diverted flight: " + e.getMessage() + RESET);
         }
+        flightManagement.getFlights().remove(f);
+        flightManagement.saveFlightsToFile();
+        System.out.println(RED + "🔄 Flight " + f.getFlightInstanceId() + " DIVERTED." + RESET);
     }
 
-    // ========================
-    // Save all arrived flights
-    // ========================
     public void saveAllArrivedFlights(List<Flight> arrivedFlights) {
         if (arrivedFlights.isEmpty()) return;
         try (BufferedWriter bw = new BufferedWriter(new FileWriter(arrivedFlightFilePath, true))) {
@@ -94,49 +98,48 @@ public class ArrivalFlightManager {
                 bw.write(f.toFileString());
                 bw.newLine();
             }
-            System.out.println("All arrived flights saved to " + arrivedFlightFilePath);
+            System.out.println(GREEN + "All arrived flights saved to " + arrivedFlightFilePath + RESET);
         } catch (IOException e) {
-            System.out.println("Error saving arrived flights: " + e.getMessage());
+            System.out.println(RED + "Error saving arrived flights: " + e.getMessage() + RESET);
         }
         arrivedFlights.clear();
     }
 
-    // ========================
-    // Display arrived flights
-    // ========================
+    public void clearArrivedFlightsFile() {
+        try (BufferedWriter bw = new BufferedWriter(new FileWriter(arrivedFlightFilePath))) {
+            bw.write("");
+            System.out.println(GREEN + "Arrived flights file cleared." + RESET);
+        } catch (IOException e) {
+            System.out.println(RED + "Error clearing arrived flights file: " + e.getMessage() + RESET);
+        }
+    }
+
     public void displayArrivedFlights() {
         try (BufferedReader br = new BufferedReader(new FileReader(arrivedFlightFilePath))) {
             String line;
             boolean empty = true;
+            System.out.println("\n" + CYAN + "╔══════════════════════════════════════════════════════════════╗" + RESET);
+            System.out.println(CYAN + "║                    ARRIVED FLIGHTS                            ║" + RESET);
+            System.out.println(CYAN + "╚══════════════════════════════════════════════════════════════╝" + RESET);
             while ((line = br.readLine()) != null) {
                 empty = false;
                 String[] parts = line.split(",");
-                System.out.println("\nFlight Number: " + parts[0]);
-                System.out.println("Flight Instance ID: " + parts[1]);
-                System.out.println("Origin: " + parts[4]);
-                System.out.println("Destination: " + parts[5]);
-                System.out.println("Departure: " + parts[6]);
-                System.out.println("Arrival: " + parts[7]);
-                System.out.println("Status: " + parts[8]);
-                System.out.println("Gate: " + parts[9]);
-                System.out.println("Runway: " + parts[10]);
-                System.out.println("--------------------------------------------");
+                System.out.println(CYAN + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" + RESET);
+                System.out.println("   Flight Number: " + parts[0]);
+                System.out.println("   Flight Instance: " + parts[1]);
+                System.out.println("   Route: " + parts[4] + " → " + parts[5]);
+                System.out.println("   Departure: " + parts[6]);
+                System.out.println("   Arrival: " + parts[7]);
+                System.out.println("   Status: " + parts[8]);
+                System.out.println("   Gate: " + (parts[9].equals("-") ? "—" : parts[9]));
+                System.out.println("   Runway: " + (parts[10].equals("-") ? "—" : parts[10]));
             }
-            if (empty) System.out.println("No arrived flights found.");
+            if (empty) {
+                System.out.println(YELLOW + "   No arrived flights found." + RESET);
+            }
+            System.out.println();
         } catch (IOException e) {
-            System.out.println("Error reading arrived flights: " + e.getMessage());
-        }
-    }
-
-    // ========================
-    // Clear arrived flights file
-    // ========================
-    public void clearArrivedFlightsFile() {
-        try (BufferedWriter bw = new BufferedWriter(new FileWriter(arrivedFlightFilePath))) {
-            bw.write("");
-            System.out.println("Arrived flights file cleared.");
-        } catch (IOException e) {
-            System.out.println("Error clearing arrived flights file: " + e.getMessage());
+            System.out.println(RED + "Error reading arrived flights: " + e.getMessage() + RESET);
         }
     }
 
